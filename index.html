@@ -745,12 +745,16 @@ function renderTrades() {
       // Check if it's a stock holding
       const hIdx = holdings.findIndex(h => h.symbol === t.symbol);
       if (hIdx >= 0) {
-        const h = holdings[hIdx];
-        const curSL = h.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${h.sl}</span>` : '';
+        const h = holdings[hIdx];         const curSL = h.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${h.sl}</span>` : '';
         const curTP = h.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${h.tp}</span>` : '';
         const curTSL = h.trailingSL ? `<span class="sltp-badge sl" style="font-size:9px">TSL ${h.trailingSL}%</span>` : '';
+        const pnl = (h.currentPrice - h.avgPrice) * h.qty;
         sltpBtn = `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${curSL}${curTP}${curTSL}</div>
-          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:4px;padding:4px 10px;font-size:11px" onclick="openSLTPModal(${hIdx})">⚙ Set SL/TP</button>`;
+          <div style="font-size:11px;margin-top:3px" class="font-mono ${pnl>=0?'positive':'negative'}">Live P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}</div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0;padding:4px 10px;font-size:11px" onclick="openSLTPModal(${hIdx})">⚙ SL/TP</button>
+            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openModal('${h.symbol}','SELL')">🚪 EXIT</button>
+          </div>`;
       }
       // Check if it's an options position
       const oIdx = optionsPositions.findIndex(p => `${p.index} ${p.strike} ${p.type}` === t.symbol);
@@ -759,8 +763,14 @@ function renderTrades() {
         const curSL = p.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${p.sl}</span>` : '';
         const curTP = p.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${p.tp}</span>` : '';
         const curTSL = p.trailingSL ? `<span class="sltp-badge sl" style="font-size:9px">TSL ${p.trailingSL}%</span>` : '';
+        const totalQty = p.lots * p.lotSize;
+        const optPnl = (p.currentPremium - p.avgPremium) * totalQty;
         sltpBtn = `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${curSL}${curTP}${curTSL}</div>
-          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:4px;padding:4px 10px;font-size:11px" onclick="openOptSLTPModal(${oIdx})">⚙ Set SL/TP</button>`;
+          <div style="font-size:11px;margin-top:3px" class="font-mono ${optPnl>=0?'positive':'negative'}">Live P&L: ${optPnl>=0?'+':''}${fmtINR(optPnl)}</div>
+          <div style="display:flex;gap:6px;margin-top:4px">
+            <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0;padding:4px 10px;font-size:11px" onclick="openOptSLTPModal(${oIdx})">⚙ SL/TP</button>
+            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openOptModal('${p.index}','${p.type}',${p.strike},${p.currentPremium},${p.lotSize})">🚪 EXIT</button>
+          </div>`;
       }
     }
 
