@@ -200,6 +200,16 @@
     .opt-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
     .opt-tag.ce { background: rgba(34,197,94,0.15); color: var(--green); }
     .opt-tag.pe { background: rgba(239,68,68,0.15); color: var(--red); }
+    .sltp-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+    .sltp-box { background: #12141E; border-radius: 8px; padding: 10px; }
+    .sltp-box label { font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+    .sltp-box input { width: 100%; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-family: 'JetBrains Mono', monospace; color: white; font-size: 13px; outline: none; }
+    .sltp-box input:focus { border-color: var(--blue); }
+    .sltp-box.sl label { color: var(--red); }
+    .sltp-box.tp label { color: var(--green); }
+    .sltp-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+    .sltp-badge.sl { background: rgba(239,68,68,0.12); color: var(--red); }
+    .sltp-badge.tp { background: rgba(34,197,94,0.12); color: var(--green); }
   </style>
 </head>
 <body>
@@ -474,6 +484,7 @@ async function fetchLiveData() {
 
     initFilters();
     renderAll();
+    checkSLTP(); // Auto-trigger SL/TP on price update
     console.log(`📊 Live update: ${stocks.length} stocks`);
   } catch(e) {
     console.warn('Fetch error, using fallback', e.message);
@@ -603,9 +614,12 @@ function renderPortfolio() {
   document.getElementById('holdings-list').innerHTML = holdings.map(h => {
     const pnl = (h.currentPrice - h.avgPrice) * h.qty;
     const pp = ((h.currentPrice - h.avgPrice)/h.avgPrice * 100).toFixed(2);
+    const slBadge = h.sl ? `<span class="sltp-badge sl">SL ₹${h.sl}</span>` : '';
+    const tpBadge = h.tp ? `<span class="sltp-badge tp">TP ₹${h.tp}</span>` : '';
     return `<div class="holding-row">
       <div><div class="stock-name">${h.symbol}</div><div class="stock-full-name">${h.name}</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${h.qty} shares × Avg ₹${h.avgPrice.toLocaleString('en-IN')}</div></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${h.qty} shares × Avg ₹${h.avgPrice.toLocaleString('en-IN')}</div>
+        <div style="display:flex;gap:4px;margin-top:4px">${slBadge}${tpBadge}</div></div>
       <div style="text-align:right">
         <div class="font-mono" style="font-weight:600">${fmtINR(h.currentPrice * h.qty)}</div>
         <div class="font-mono ${pnl>=0?'positive':'negative'}" style="font-size:14px">${pnl>=0?'+':''}${fmtINR(pnl)} (${pp}%)</div>
@@ -755,6 +769,16 @@ function renderModal() {
           <button class="qty-btn" onclick="modalQty++;renderModal()">+</button>
         </div>
       </div>
+      <div class="sltp-row">
+        <div class="sltp-box sl">
+          <label>🔴 Stop Loss (SL)</label>
+          <input type="number" id="modal-sl" placeholder="e.g. ${(s.price*0.97).toFixed(2)}" step="0.05" />
+        </div>
+        <div class="sltp-box tp">
+          <label>🟢 Take Profit (TP)</label>
+          <input type="number" id="modal-tp" placeholder="e.g. ${(s.price*1.03).toFixed(2)}" step="0.05" />
+        </div>
+      </div>
       <div class="total-box">
         <span class="total-label">Order Total</span>
         <span class="total-value font-mono">${fmtINR(total)}</span>
@@ -771,6 +795,9 @@ function executeTrade() {
   const qty = modalQty;
   const total = s.price * qty;
 
+  const slVal = parseFloat(document.getElementById('modal-sl')?.value) || 0;
+  const tpVal = parseFloat(document.getElementById('modal-tp')?.value) || 0;
+
   if (modalType === 'BUY') {
     if (total > balance) { showToast('Insufficient balance!', 'error'); return; }
     balance -= total;
@@ -780,8 +807,10 @@ function executeTrade() {
       existing.avgPrice = Math.round(((existing.avgPrice * existing.qty + s.price * qty) / nq) * 100) / 100;
       existing.qty = nq;
       existing.currentPrice = s.price;
+      if (slVal) existing.sl = slVal;
+      if (tpVal) existing.tp = tpVal;
     } else {
-      holdings.push({ symbol: s.symbol, name: s.name, qty, avgPrice: s.price, currentPrice: s.price });
+      holdings.push({ symbol: s.symbol, name: s.name, qty, avgPrice: s.price, currentPrice: s.price, sl: slVal || null, tp: tpVal || null });
     }
   } else {
     const h = holdings.find(h => h.symbol === s.symbol);
@@ -791,14 +820,53 @@ function executeTrade() {
     else h.qty -= qty;
   }
 
+  const slInfo = slVal ? ` | SL: ₹${slVal}` : '';
+  const tpInfo = tpVal ? ` | TP: ₹${tpVal}` : '';
   trades.unshift({
     id: Date.now(), symbol: s.symbol, name: s.name, type: modalType, qty, price: s.price, total,
-    timestamp: new Date().toLocaleString('en-IN')
+    timestamp: new Date().toLocaleString('en-IN'), sl: slVal || null, tp: tpVal || null
   });
 
-  showToast(`${modalType === 'BUY' ? '🟢' : '🔴'} ${modalType} ${qty} ${s.symbol} @ ₹${s.price.toLocaleString('en-IN')}`, 'success');
+  showToast(`${modalType === 'BUY' ? '🟢' : '🔴'} ${modalType} ${qty} ${s.symbol} @ ₹${s.price.toLocaleString('en-IN')}${slInfo}${tpInfo}`, 'success');
   closeModal();
   renderAll();
+}
+
+// ===== SL/TP AUTO-TRIGGER =====
+function checkSLTP() {
+  const triggered = [];
+  holdings = holdings.filter(h => {
+    const s = stocks.find(x => x.symbol === h.symbol);
+    if (!s) return true;
+    h.currentPrice = s.price;
+
+    // Check Stop Loss
+    if (h.sl && s.price <= h.sl) {
+      const total = s.price * h.qty;
+      balance += total;
+      trades.unshift({
+        id: Date.now(), symbol: h.symbol, name: h.name, type: 'SELL', qty: h.qty, price: s.price, total,
+        timestamp: new Date().toLocaleString('en-IN'), note: '🔴 SL HIT'
+      });
+      triggered.push(`🔴 SL HIT: ${h.symbol} sold ${h.qty} @ ₹${s.price.toLocaleString('en-IN')}`);
+      return false; // remove from holdings
+    }
+
+    // Check Take Profit
+    if (h.tp && s.price >= h.tp) {
+      const total = s.price * h.qty;
+      balance += total;
+      trades.unshift({
+        id: Date.now(), symbol: h.symbol, name: h.name, type: 'SELL', qty: h.qty, price: s.price, total,
+        timestamp: new Date().toLocaleString('en-IN'), note: '🟢 TP HIT'
+      });
+      triggered.push(`🟢 TP HIT: ${h.symbol} sold ${h.qty} @ ₹${s.price.toLocaleString('en-IN')}`);
+      return false; // remove from holdings
+    }
+    return true;
+  });
+  triggered.forEach(msg => showToast(msg, msg.includes('TP') ? 'success' : 'error'));
+  if (triggered.length > 0) renderAll();
 }
 
 // ===== TOAST =====
