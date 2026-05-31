@@ -119,8 +119,8 @@
     .sell-small-btn:hover { background: rgba(239,68,68,0.25); }
 
     /* Modal */
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
-    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 20px 20px 0 0; width: 100%; max-width: 420px; padding: 24px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: flex-end; justify-content: center; overflow-y: auto; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 20px 20px 0 0; width: 100%; max-width: 420px; padding: 24px; max-height: 90vh; overflow-y: auto; }
     .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
     .modal-close { background: none; border: none; color: var(--text-muted); font-size: 24px; cursor: pointer; }
     .modal-close:hover { color: white; }
@@ -635,21 +635,100 @@ function renderPortfolio() {
     document.getElementById('holdings-list').innerHTML = '<div class="empty"><div class="empty-icon">📦</div><h3>No Holdings Yet</h3><p>Go to Market tab and buy your first stock!</p></div>';
     return;
   }
-  document.getElementById('holdings-list').innerHTML = holdings.map(h => {
+  document.getElementById('holdings-list').innerHTML = holdings.map((h, idx) => {
     const pnl = (h.currentPrice - h.avgPrice) * h.qty;
     const pp = ((h.currentPrice - h.avgPrice)/h.avgPrice * 100).toFixed(2);
     const slBadge = h.sl ? `<span class="sltp-badge sl">SL ₹${h.sl}</span>` : '';
     const tpBadge = h.tp ? `<span class="sltp-badge tp">TP ₹${h.tp}</span>` : '';
+    const tslBadge = h.trailingSL ? `<span class="sltp-badge sl">TSL ${h.trailingSL}%</span>` : '';
     return `<div class="holding-row">
       <div><div class="stock-name">${h.symbol}</div><div class="stock-full-name">${h.name}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${h.qty} shares × Avg ₹${h.avgPrice.toLocaleString('en-IN')}</div>
-        <div style="display:flex;gap:4px;margin-top:4px">${slBadge}${tpBadge}</div></div>
+        <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${slBadge}${tpBadge}${tslBadge}</div></div>
       <div style="text-align:right">
         <div class="font-mono" style="font-weight:600">${fmtINR(h.currentPrice * h.qty)}</div>
         <div class="font-mono ${pnl>=0?'positive':'negative'}" style="font-size:14px">${pnl>=0?'+':''}${fmtINR(pnl)} (${pp}%)</div>
-        <button class="sell-small-btn" onclick="openModal('${h.symbol}','SELL')">SELL</button>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0" onclick="openSLTPModal(${idx})">⚙ SL/TP</button>
+          <button class="sell-small-btn" style="margin-top:0" onclick="openModal('${h.symbol}','SELL')">SELL</button>
+        </div>
       </div></div>`;
   }).join('');
+}
+
+// ===== EDIT SL/TP MODAL =====
+function openSLTPModal(holdingIdx) {
+  const h = holdings[holdingIdx];
+  if (!h) return;
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modal').innerHTML = `
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size:20px;font-weight:700">⚙ Edit SL/TP</h3>
+          <p style="font-size:14px;color:var(--text-muted)">${h.symbol} • ${h.qty} shares @ Avg ₹${h.avgPrice}</p>
+        </div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-price-box">
+        <div>
+          <div style="font-size:12px;color:var(--text-muted)">Current Price</div>
+          <div class="font-mono" style="font-size:22px;font-weight:700">₹${h.currentPrice.toLocaleString('en-IN')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:12px;color:var(--text-muted)">P&L</div>
+          <div class="font-mono ${(h.currentPrice-h.avgPrice)>=0?'positive':'negative'}" style="font-size:16px;font-weight:600">${fmtINR((h.currentPrice-h.avgPrice)*h.qty)}</div>
+        </div>
+      </div>
+      <div class="sltp-row">
+        <div class="sltp-box sl">
+          <label>🔴 Stop Loss (SL)</label>
+          <input type="number" id="edit-sl" value="${h.sl || ''}" placeholder="e.g. ${(h.currentPrice*0.97).toFixed(2)}" step="0.05" />
+        </div>
+        <div class="sltp-box tp">
+          <label>🟢 Take Profit (TP)</label>
+          <input type="number" id="edit-tp" value="${h.tp || ''}" placeholder="e.g. ${(h.currentPrice*1.03).toFixed(2)}" step="0.05" />
+        </div>
+      </div>
+      <div class="sltp-row" style="grid-template-columns:1fr">
+        <div class="sltp-box" style="background:#12141E">
+          <label style="color:var(--yellow,#f59e0b)">📐 Trailing Stop Loss (%)</label>
+          <input type="number" id="edit-tsl" value="${h.trailingSL || ''}" placeholder="e.g. 2 (means 2% trailing)" step="0.5" min="0.5" max="20" />
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px">SL auto-moves up as price rises. Leave empty to disable.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="execute-btn buy" style="flex:1" onclick="saveSLTP(${holdingIdx})">💾 Save SL/TP</button>
+        <button class="execute-btn sell" style="flex:0.5" onclick="clearSLTP(${holdingIdx})">Clear All</button>
+      </div>
+    </div>`;
+  document.getElementById('modal').onclick = closeModal;
+}
+
+function saveSLTP(idx) {
+  const h = holdings[idx];
+  if (!h) return;
+  const sl = parseFloat(document.getElementById('edit-sl').value) || null;
+  const tp = parseFloat(document.getElementById('edit-tp').value) || null;
+  const tsl = parseFloat(document.getElementById('edit-tsl').value) || null;
+  h.sl = sl;
+  h.tp = tp;
+  h.trailingSL = tsl;
+  if (tsl) h.trailingHighest = Math.max(h.currentPrice, h.trailingHighest || h.currentPrice);
+  saveState();
+  closeModal();
+  showToast(`✅ SL/TP updated for ${h.symbol}`, 'success');
+  renderAll();
+}
+
+function clearSLTP(idx) {
+  const h = holdings[idx];
+  if (!h) return;
+  h.sl = null; h.tp = null; h.trailingSL = null; h.trailingHighest = null;
+  saveState();
+  closeModal();
+  showToast(`🗑 SL/TP cleared for ${h.symbol}`, 'success');
+  renderAll();
 }
 
 function renderTrades() {
@@ -657,17 +736,23 @@ function renderTrades() {
     document.getElementById('trades-list').innerHTML = '<div class="empty"><div class="empty-icon">📜</div><h3>No Trades Yet</h3><p>Your executed trades will appear here</p></div>';
     return;
   }
-  document.getElementById('trades-list').innerHTML = trades.map(t => `
-    <div class="trade-row">
+  document.getElementById('trades-list').innerHTML = trades.map(t => {
+    const noteTag = t.note ? `<span class="sltp-badge ${t.note.includes('SL')?'sl':'tp'}" style="margin-left:6px">${t.note}</span>` : '';
+    const slInfo = t.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${t.sl}</span>` : '';
+    const tpInfo = t.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${t.tp}</span>` : '';
+    return `<div class="trade-row">
       <div style="display:flex;align-items:center;gap:12px">
         <div class="trade-badge ${t.type.toLowerCase()}">${t.type}</div>
-        <div><div class="stock-name" style="font-size:14px">${t.symbol}</div><div style="font-size:12px;color:var(--text-muted)">${t.timestamp}</div></div>
+        <div><div class="stock-name" style="font-size:14px">${t.symbol}${noteTag}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${t.timestamp}</div>
+          <div style="display:flex;gap:4px;margin-top:2px">${slInfo}${tpInfo}</div></div>
       </div>
       <div style="text-align:right">
-        <div class="font-mono" style="font-size:14px">${t.qty} × ₹${t.price.toLocaleString('en-IN')}</div>
+        <div class="font-mono" style="font-size:14px">${t.qty} × ₹${typeof t.price === 'number' ? t.price.toLocaleString('en-IN') : t.price}</div>
         <div class="font-mono" style="font-size:12px;color:var(--text-sec)">Total: ${fmtINR(t.total)}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderWatchlist() {
@@ -866,16 +951,27 @@ function checkSLTP() {
     if (!s) return true;
     h.currentPrice = s.price;
 
+    // Trailing SL: update highest price and adjust SL
+    if (h.trailingSL && h.trailingSL > 0) {
+      if (!h.trailingHighest || s.price > h.trailingHighest) {
+        h.trailingHighest = s.price;
+      }
+      const trailSL = Math.round(h.trailingHighest * (1 - h.trailingSL / 100) * 100) / 100;
+      if (!h.sl || trailSL > h.sl) {
+        h.sl = trailSL; // auto-move SL up
+      }
+    }
+
     // Check Stop Loss
     if (h.sl && s.price <= h.sl) {
       const total = s.price * h.qty;
       balance += total;
       trades.unshift({
         id: Date.now(), symbol: h.symbol, name: h.name, type: 'SELL', qty: h.qty, price: s.price, total,
-        timestamp: new Date().toLocaleString('en-IN'), note: '🔴 SL HIT'
+        timestamp: new Date().toLocaleString('en-IN'), note: h.trailingSL ? '🔴 TSL HIT' : '🔴 SL HIT'
       });
-      triggered.push(`🔴 SL HIT: ${h.symbol} sold ${h.qty} @ ₹${s.price.toLocaleString('en-IN')}`);
-      return false; // remove from holdings
+      triggered.push(`🔴 ${h.trailingSL?'Trailing ':''}SL HIT: ${h.symbol} sold ${h.qty} @ ₹${s.price.toLocaleString('en-IN')}`);
+      return false;
     }
 
     // Check Take Profit
@@ -887,7 +983,7 @@ function checkSLTP() {
         timestamp: new Date().toLocaleString('en-IN'), note: '🟢 TP HIT'
       });
       triggered.push(`🟢 TP HIT: ${h.symbol} sold ${h.qty} @ ₹${s.price.toLocaleString('en-IN')}`);
-      return false; // remove from holdings
+      return false;
     }
     return true;
   });
