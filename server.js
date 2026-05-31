@@ -217,11 +217,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(chains));
   }
-  else if (req.url === '/' || req.url === '/index.html') {
+  else if (req.url === '/' || req.url === '/index.html' || req.url.startsWith('/?')) {
     const file = path.join(__dirname, 'index.html');
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
-      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0' });
       res.end(data);
     });
   }

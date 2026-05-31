@@ -738,14 +738,39 @@ function renderTrades() {
   }
   document.getElementById('trades-list').innerHTML = trades.map(t => {
     const noteTag = t.note ? `<span class="sltp-badge ${t.note.includes('SL')?'sl':'tp'}" style="margin-left:6px">${t.note}</span>` : '';
-    const slInfo = t.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${t.sl}</span>` : '';
-    const tpInfo = t.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${t.tp}</span>` : '';
+    
+    // Find active position for this trade
+    let sltpBtn = '';
+    if (t.type === 'BUY') {
+      // Check if it's a stock holding
+      const hIdx = holdings.findIndex(h => h.symbol === t.symbol);
+      if (hIdx >= 0) {
+        const h = holdings[hIdx];
+        const curSL = h.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${h.sl}</span>` : '';
+        const curTP = h.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${h.tp}</span>` : '';
+        const curTSL = h.trailingSL ? `<span class="sltp-badge sl" style="font-size:9px">TSL ${h.trailingSL}%</span>` : '';
+        sltpBtn = `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${curSL}${curTP}${curTSL}</div>
+          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:4px;padding:4px 10px;font-size:11px" onclick="openSLTPModal(${hIdx})">⚙ Set SL/TP</button>`;
+      }
+      // Check if it's an options position
+      const oIdx = optionsPositions.findIndex(p => `${p.index} ${p.strike} ${p.type}` === t.symbol);
+      if (oIdx >= 0) {
+        const p = optionsPositions[oIdx];
+        const curSL = p.sl ? `<span class="sltp-badge sl" style="font-size:9px">SL ₹${p.sl}</span>` : '';
+        const curTP = p.tp ? `<span class="sltp-badge tp" style="font-size:9px">TP ₹${p.tp}</span>` : '';
+        const curTSL = p.trailingSL ? `<span class="sltp-badge sl" style="font-size:9px">TSL ${p.trailingSL}%</span>` : '';
+        sltpBtn = `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${curSL}${curTP}${curTSL}</div>
+          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:4px;padding:4px 10px;font-size:11px" onclick="openOptSLTPModal(${oIdx})">⚙ Set SL/TP</button>`;
+      }
+    }
+
     return `<div class="trade-row">
       <div style="display:flex;align-items:center;gap:12px">
         <div class="trade-badge ${t.type.toLowerCase()}">${t.type}</div>
         <div><div class="stock-name" style="font-size:14px">${t.symbol}${noteTag}</div>
           <div style="font-size:12px;color:var(--text-muted)">${t.timestamp}</div>
-          <div style="display:flex;gap:4px;margin-top:2px">${slInfo}${tpInfo}</div></div>
+          ${sltpBtn}
+        </div>
       </div>
       <div style="text-align:right">
         <div class="font-mono" style="font-size:14px">${t.qty} × ₹${typeof t.price === 'number' ? t.price.toLocaleString('en-IN') : t.price}</div>
