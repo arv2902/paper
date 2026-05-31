@@ -359,7 +359,31 @@ let searchQuery = '';
 let sectorFilter = 'All';
 let sortBy = 'name';
 let activeTab = 'market';
-let liveMode = false; // true when server is providing data
+let liveMode = false;
+
+// ===== PERSISTENCE =====
+function saveState() {
+  try {
+    localStorage.setItem('pt_balance', JSON.stringify(balance));
+    localStorage.setItem('pt_holdings', JSON.stringify(holdings));
+    localStorage.setItem('pt_trades', JSON.stringify(trades));
+    localStorage.setItem('pt_watchlist', JSON.stringify(watchlist));
+    localStorage.setItem('pt_optPositions', JSON.stringify(typeof optionsPositions !== 'undefined' ? optionsPositions : []));
+  } catch(e) {}
+}
+function loadState() {
+  try {
+    const b = localStorage.getItem('pt_balance');
+    if (b !== null) balance = JSON.parse(b);
+    const h = localStorage.getItem('pt_holdings');
+    if (h) holdings = JSON.parse(h);
+    const t = localStorage.getItem('pt_trades');
+    if (t) trades = JSON.parse(t);
+    const w = localStorage.getItem('pt_watchlist');
+    if (w) watchlist = JSON.parse(w);
+  } catch(e) {}
+}
+loadState();
 
 // ===== HELPERS =====
 function fmtINR(n) {
@@ -712,6 +736,7 @@ document.getElementById('search-input').addEventListener('input', e => {
 function toggleWatch(sym) {
   if (watchlist.includes(sym)) watchlist = watchlist.filter(s => s !== sym);
   else watchlist.push(sym);
+  saveState();
   renderAll();
 }
 
@@ -829,6 +854,7 @@ function executeTrade() {
 
   showToast(`${modalType === 'BUY' ? '🟢' : '🔴'} ${modalType} ${qty} ${s.symbol} @ ₹${s.price.toLocaleString('en-IN')}${slInfo}${tpInfo}`, 'success');
   closeModal();
+  saveState();
   renderAll();
 }
 
@@ -866,7 +892,7 @@ function checkSLTP() {
     return true;
   });
   triggered.forEach(msg => showToast(msg, msg.includes('TP') ? 'success' : 'error'));
-  if (triggered.length > 0) renderAll();
+  if (triggered.length > 0) { saveState(); renderAll(); }
 }
 
 // ===== TOAST =====
@@ -1080,6 +1106,7 @@ function executeOptTrade(index, type, strike, premium, lotSize) {
 
   showToast(`${action === 'BUY' ? '🟢' : '🔴'} ${action} ${lots} lot ${index} ${strike} ${type} @ ₹${premium.toFixed(2)}`, 'success');
   closeModal();
+  saveState();
   renderAll();
 }
 
@@ -1114,10 +1141,14 @@ function renderOptPositions() {
 }
 
 // ===== INIT =====
-// Try to connect to live server, fallback to mock data
+// Load saved options positions
+try {
+  const op = localStorage.getItem('pt_optPositions');
+  if (op) optionsPositions = JSON.parse(op);
+} catch(e) {}
+
 fetchLiveData();
 fetchOptions();
-// Refresh live prices every 15 seconds
 setInterval(fetchLiveData, 15000);
 setInterval(fetchOptions, 15000);
 </script>
