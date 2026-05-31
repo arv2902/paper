@@ -753,7 +753,7 @@ function renderTrades() {
           <div style="font-size:11px;margin-top:3px" class="font-mono ${pnl>=0?'positive':'negative'}">Live P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}</div>
           <div style="display:flex;gap:6px;margin-top:4px">
             <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0;padding:4px 10px;font-size:11px" onclick="openSLTPModal(${hIdx})">⚙ SL/TP</button>
-            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openModal('${h.symbol}','SELL')">🚪 EXIT</button>
+            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openExitModal('stock',${hIdx})">🚪 EXIT</button>
           </div>`;
       }
       // Check if it's an options position
@@ -769,7 +769,7 @@ function renderTrades() {
           <div style="font-size:11px;margin-top:3px" class="font-mono ${optPnl>=0?'positive':'negative'}">Live P&L: ${optPnl>=0?'+':''}${fmtINR(optPnl)}</div>
           <div style="display:flex;gap:6px;margin-top:4px">
             <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0;padding:4px 10px;font-size:11px" onclick="openOptSLTPModal(${oIdx})">⚙ SL/TP</button>
-            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openOptModal('${p.index}','${p.type}',${p.strike},${p.currentPremium},${p.lotSize})">🚪 EXIT</button>
+            <button class="sell-small-btn" style="margin-top:0;padding:4px 10px;font-size:11px" onclick="openExitModal('option',${oIdx})">🚪 EXIT</button>
           </div>`;
       }
     }
@@ -1024,6 +1024,179 @@ function checkSLTP() {
   });
   triggered.forEach(msg => showToast(msg, msg.includes('TP') ? 'success' : 'error'));
   if (triggered.length > 0) { saveState(); renderAll(); }
+}
+
+// ===== EXIT MODAL =====
+function openExitModal(posType, idx) {
+  document.getElementById('modal').style.display = 'flex';
+  let html = '';
+
+  if (posType === 'stock') {
+    const h = holdings[idx];
+    if (!h) return;
+    const pnl = (h.currentPrice - h.avgPrice) * h.qty;
+    const pp = ((h.currentPrice - h.avgPrice) / h.avgPrice * 100).toFixed(2);
+    html = `
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div><h3 style="font-size:20px;font-weight:700">🚪 Exit Position</h3>
+            <p style="font-size:14px;color:var(--text-muted)">${h.symbol} • ${h.name}</p></div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-price-box">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted)">Avg Buy Price</div>
+            <div class="font-mono" style="font-size:18px">₹${h.avgPrice.toLocaleString('en-IN')}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:11px;color:var(--text-muted)">Qty</div>
+            <div class="font-mono" style="font-size:18px;font-weight:700">${h.qty}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11px;color:var(--text-muted)">Current</div>
+            <div class="font-mono" style="font-size:18px;font-weight:700">₹${h.currentPrice.toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+        <div class="font-mono ${pnl>=0?'positive':'negative'}" style="text-align:center;font-size:16px;font-weight:700;margin-bottom:16px">
+          P&L: ${pnl>=0?'+':''}${fmtINR(pnl)} (${pp}%)
+        </div>
+        <div class="sltp-row" style="grid-template-columns:1fr">
+          <div class="sltp-box" style="background:#12141E">
+            <label style="color:white">💰 Exit Price</label>
+            <input type="number" id="exit-price" value="${h.currentPrice}" step="0.05" oninput="updateExitPnl('stock',${idx})" />
+            <div id="exit-pnl" style="font-size:12px;margin-top:6px" class="font-mono ${pnl>=0?'positive':'negative'}">
+              Exit P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}
+            </div>
+          </div>
+        </div>
+        <div class="qty-row">
+          <label>Exit Quantity</label>
+          <div class="qty-controls">
+            <button class="qty-btn" onclick="document.getElementById('exit-qty').value=Math.max(1,parseInt(document.getElementById('exit-qty').value||1)-1);updateExitPnl('stock',${idx})">−</button>
+            <input class="qty-input" type="number" id="exit-qty" value="${h.qty}" min="1" max="${h.qty}" onchange="updateExitPnl('stock',${idx})" />
+            <button class="qty-btn" onclick="document.getElementById('exit-qty').value=Math.min(${h.qty},parseInt(document.getElementById('exit-qty').value||1)+1);updateExitPnl('stock',${idx})">+</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="execute-btn sell" style="flex:1" onclick="executeExit('stock',${idx})">🚪 EXIT at this price</button>
+        </div>
+        <button class="execute-btn sell" style="margin-top:8px;background:rgba(239,68,68,0.3)" onclick="document.getElementById('exit-price').value=${h.currentPrice};executeExit('stock',${idx})">⚡ EXIT at Market (₹${h.currentPrice})</button>
+      </div>`;
+  } else {
+    const p = optionsPositions[idx];
+    if (!p) return;
+    const totalQty = p.lots * p.lotSize;
+    const pnl = (p.currentPremium - p.avgPremium) * totalQty;
+    const pp = p.avgPremium > 0 ? ((p.currentPremium - p.avgPremium) / p.avgPremium * 100).toFixed(2) : '0';
+    html = `
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <div><h3 style="font-size:20px;font-weight:700">🚪 Exit Position</h3>
+            <p style="font-size:14px;color:var(--text-muted)">${p.index} ${p.strike} <span class="opt-tag ${p.type.toLowerCase()}">${p.type}</span></p></div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-price-box">
+          <div>
+            <div style="font-size:11px;color:var(--text-muted)">Avg Premium</div>
+            <div class="font-mono" style="font-size:18px">₹${p.avgPremium.toFixed(2)}</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:11px;color:var(--text-muted)">${p.lots}L × ${p.lotSize}</div>
+            <div class="font-mono" style="font-size:18px;font-weight:700">${totalQty} qty</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:11px;color:var(--text-muted)">Current</div>
+            <div class="font-mono" style="font-size:18px;font-weight:700;color:${p.type==='CE'?'var(--green)':'var(--red)'}">₹${p.currentPremium.toFixed(2)}</div>
+          </div>
+        </div>
+        <div class="font-mono ${pnl>=0?'positive':'negative'}" style="text-align:center;font-size:16px;font-weight:700;margin-bottom:16px">
+          P&L: ${pnl>=0?'+':''}${fmtINR(pnl)} (${pp}%)
+        </div>
+        <div class="sltp-row" style="grid-template-columns:1fr">
+          <div class="sltp-box" style="background:#12141E">
+            <label style="color:white">💰 Exit Premium</label>
+            <input type="number" id="exit-price" value="${p.currentPremium.toFixed(2)}" step="0.05" oninput="updateExitPnl('option',${idx})" />
+            <div id="exit-pnl" style="font-size:12px;margin-top:6px" class="font-mono ${pnl>=0?'positive':'negative'}">
+              Exit P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}
+            </div>
+          </div>
+        </div>
+        <div class="qty-row">
+          <label>Exit Lots</label>
+          <div class="qty-controls">
+            <button class="qty-btn" onclick="document.getElementById('exit-qty').value=Math.max(1,parseInt(document.getElementById('exit-qty').value||1)-1);updateExitPnl('option',${idx})">−</button>
+            <input class="qty-input" type="number" id="exit-qty" value="${p.lots}" min="1" max="${p.lots}" onchange="updateExitPnl('option',${idx})" />
+            <button class="qty-btn" onclick="document.getElementById('exit-qty').value=Math.min(${p.lots},parseInt(document.getElementById('exit-qty').value||1)+1);updateExitPnl('option',${idx})">+</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="execute-btn sell" style="flex:1" onclick="executeExit('option',${idx})">🚪 EXIT at this price</button>
+        </div>
+        <button class="execute-btn sell" style="margin-top:8px;background:rgba(239,68,68,0.3)" onclick="document.getElementById('exit-price').value=${p.currentPremium.toFixed(2)};executeExit('option',${idx})">⚡ EXIT at Market (₹${p.currentPremium.toFixed(2)})</button>
+      </div>`;
+  }
+
+  document.getElementById('modal').innerHTML = html;
+  document.getElementById('modal').onclick = closeModal;
+}
+
+function updateExitPnl(posType, idx) {
+  const exitPrice = parseFloat(document.getElementById('exit-price').value) || 0;
+  const exitQty = parseInt(document.getElementById('exit-qty').value) || 1;
+  let pnl = 0;
+  if (posType === 'stock') {
+    const h = holdings[idx];
+    if (!h) return;
+    pnl = (exitPrice - h.avgPrice) * exitQty;
+  } else {
+    const p = optionsPositions[idx];
+    if (!p) return;
+    pnl = (exitPrice - p.avgPremium) * exitQty * p.lotSize;
+  }
+  const el = document.getElementById('exit-pnl');
+  el.textContent = `Exit P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}`;
+  el.className = `font-mono ${pnl >= 0 ? 'positive' : 'negative'}`;
+}
+
+function executeExit(posType, idx) {
+  const exitPrice = parseFloat(document.getElementById('exit-price').value) || 0;
+  const exitQty = parseInt(document.getElementById('exit-qty').value) || 1;
+  if (exitPrice <= 0) { showToast('Enter valid exit price!', 'error'); return; }
+
+  if (posType === 'stock') {
+    const h = holdings[idx];
+    if (!h) return;
+    if (exitQty > h.qty) { showToast('Qty exceeds holdings!', 'error'); return; }
+    const total = exitPrice * exitQty;
+    const pnl = (exitPrice - h.avgPrice) * exitQty;
+    balance += total;
+    trades.unshift({
+      id: Date.now(), symbol: h.symbol, name: h.name, type: 'SELL', qty: exitQty, price: exitPrice, total,
+      timestamp: new Date().toLocaleString('en-IN'), note: pnl >= 0 ? '🟢 EXIT' : '🔴 EXIT'
+    });
+    if (exitQty >= h.qty) holdings.splice(idx, 1);
+    else h.qty -= exitQty;
+    showToast(`🚪 EXIT ${exitQty} ${h.symbol} @ ₹${exitPrice} | P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}`, pnl >= 0 ? 'success' : 'error');
+  } else {
+    const p = optionsPositions[idx];
+    if (!p) return;
+    if (exitQty > p.lots) { showToast('Lots exceed position!', 'error'); return; }
+    const totalQty = exitQty * p.lotSize;
+    const total = exitPrice * totalQty;
+    const pnl = (exitPrice - p.avgPremium) * totalQty;
+    balance += total;
+    trades.unshift({
+      id: Date.now(), symbol: `${p.index} ${p.strike} ${p.type}`, name: `${p.type === 'CE' ? 'Call' : 'Put'} Option`, type: 'SELL',
+      qty: `${exitQty}L (${totalQty})`, price: exitPrice, total,
+      timestamp: new Date().toLocaleString('en-IN'), note: pnl >= 0 ? '🟢 EXIT' : '🔴 EXIT'
+    });
+    if (exitQty >= p.lots) optionsPositions.splice(idx, 1);
+    else p.lots -= exitQty;
+    showToast(`🚪 EXIT ${exitQty}L ${p.index} ${p.strike} ${p.type} @ ₹${exitPrice} | P&L: ${pnl>=0?'+':''}${fmtINR(pnl)}`, pnl >= 0 ? 'success' : 'error');
+  }
+  saveState();
+  closeModal();
+  renderAll();
 }
 
 // ===== TOAST =====
