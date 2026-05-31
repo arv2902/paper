@@ -369,53 +369,106 @@ function chgPct(s) {
   return ((s.change / base) * 100).toFixed(2);
 }
 
-// ===== LIVE DATA FETCH =====
-async function fetchLiveData() {
-  try {
-    const res = await fetch('/api/quotes');
-    const data = await res.json();
+// Sector mapping
+const SECTOR_MAP = {
+  RELIANCE:'Oil & Gas', TCS:'IT', HDFCBANK:'Banking', INFY:'IT', ICICIBANK:'Banking',
+  HINDUNILVR:'FMCG', SBIN:'Banking', BHARTIARTL:'Telecom', ITC:'FMCG', KOTAKBANK:'Banking',
+  LT:'Infrastructure', AXISBANK:'Banking', ASIANPAINT:'Paints', MARUTI:'Auto', SUNPHARMA:'Pharma',
+  TATAMOTORS:'Auto', WIPRO:'IT', ULTRACEMCO:'Cement', BAJFINANCE:'Finance', BAJAJFINSV:'Finance',
+  TITAN:'Consumer', NESTLEIND:'FMCG', TATASTEEL:'Metals', ADANIENT:'Conglomerate', NTPC:'Power',
+  POWERGRID:'Power', ONGC:'Oil & Gas', JSWSTEEL:'Metals', 'M&M':'Auto', HCLTECH:'IT',
+  TECHM:'IT', INDUSINDBK:'Banking', HINDALCO:'Metals', COALINDIA:'Mining', DRREDDY:'Pharma',
+  CIPLA:'Pharma', GRASIM:'Cement', BPCL:'Oil & Gas', APOLLOHOSP:'Healthcare', EICHERMOT:'Auto',
+  DIVISLAB:'Pharma', TATACONSUM:'FMCG', SBILIFE:'Insurance', BRITANNIA:'FMCG', HEROMOTOCO:'Auto',
+  'BAJAJ-AUTO':'Auto', ADANIPORTS:'Infrastructure', HDFCLIFE:'Insurance', SHRIRAMFIN:'Finance'
+};
 
-    if (data.stocks && data.stocks.length > 0) {
-      // Merge: update existing stock prices, add new ones
-      const newStocks = data.stocks.map(s => ({
-        ...s,
-        changePercent: s.changePercent || 0,
-        high52w: s.high52w || 0,
-        low52w: s.low52w || 0,
-        marketCap: s.marketCap || 'N/A',
-        pe: s.pe || 0,
-        volume: s.volume || 0,
-      }));
+const ALL_SYMBOLS = [
+  'RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','HINDUNILVR','SBIN','BHARTIARTL',
+  'ITC','KOTAKBANK','LT','AXISBANK','ASIANPAINT','MARUTI','SUNPHARMA','TATAMOTORS',
+  'WIPRO','ULTRACEMCO','BAJFINANCE','BAJAJFINSV','TITAN','NESTLEIND','TATASTEEL',
+  'ADANIENT','NTPC','POWERGRID','ONGC','JSWSTEEL','M%26M','HCLTECH','TECHM','INDUSINDBK',
+  'HINDALCO','COALINDIA','DRREDDY','CIPLA','GRASIM','BPCL','APOLLOHOSP','EICHERMOT',
+  'DIVISLAB','TATACONSUM','SBILIFE','BRITANNIA','HEROMOTOCO','BAJAJ-AUTO','ADANIPORTS',
+  'HDFCLIFE','SHRIRAMFIN'
+];
+const INDEX_SYMBOLS = ['^NSEI', '^BSESN', '^NSEBANK'];
+
+// CORS proxy for Yahoo Finance from browser
+const PROXY = 'https://corsproxy.io/?url=';
+
+async function fetchYahooChart(symbol) {
+  const ySym = symbol.startsWith('^') ? symbol : symbol + '.NS';
+  const url = `${PROXY}${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(ySym) + '?interval=1d&range=1d')}`;
+  const res = await fetch(url);
+  const d = await res.json();
+  if (d.chart && d.chart.result && d.chart.result[0]) {
+    return d.chart.result[0].meta;
+  }
+  return null;
+}
+
+// ===== LIVE DATA FETCH =====
+let fetchInProgress = false;
+async function fetchLiveData() {
+  if (fetchInProgress) return;
+  fetchInProgress = true;
+  try {
+    // Fetch stocks in parallel (batches of 8 to avoid rate limits)
+    const newStocks = [];
+    for (let i = 0; i < ALL_SYMBOLS.length; i += 8) {
+      const batch = ALL_SYMBOLS.slice(i, i + 8);
+      const results = await Promise.allSettled(batch.map(s => fetchYahooChart(s)));
+      for (let j = 0; j < results.length; j++) {
+        if (results[j].status === 'fulfilled' && results[j].value) {
+          const meta = results[j].value;
+          const sym = (meta.symbol || '').replace('.NS', '');
+          const prev = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
+          newStocks.push({
+            symbol: sym,
+            name: meta.shortName || sym,
+            sector: SECTOR_MAP[sym] || 'Other',
+            price: Math.round((meta.regularMarketPrice || 0) * 100) / 100,
+            change: Math.round((meta.regularMarketPrice - prev) * 100) / 100,
+            changePercent: Math.round(((meta.regularMarketPrice - prev) / prev * 100) * 100) / 100,
+            high52w: Math.round((meta.fiftyTwoWeekHigh || 0) * 100) / 100,
+            low52w: Math.round((meta.fiftyTwoWeekLow || 0) * 100) / 100,
+            marketCap: 'N/A',
+            pe: 0,
+            volume: meta.regularMarketVolume || 0,
+          });
+        }
+      }
+    }
+
+    if (newStocks.length > 0) {
       stocks = newStocks;
       liveMode = true;
-
-      // Update holdings with live prices
       holdings = holdings.map(h => {
         const s = stocks.find(x => x.symbol === h.symbol);
         return s ? { ...h, currentPrice: s.price } : h;
       });
     }
 
-    // Update indices
-    if (data.indices) {
-      const idx = data.indices;
-      if (idx.NIFTY50) {
-        document.getElementById('nifty-val').textContent = idx.NIFTY50.value.toLocaleString('en-IN');
-        const nChg = document.getElementById('nifty-chg');
-        nChg.textContent = `${idx.NIFTY50.change>=0?'▲':'▼'} ${Math.abs(idx.NIFTY50.change).toFixed(2)} (${idx.NIFTY50.changePercent.toFixed(2)}%)`;
-        nChg.className = 'ticker-value ' + (idx.NIFTY50.change >= 0 ? 'positive' : 'negative');
-      }
-      if (idx.SENSEX) {
-        document.getElementById('sensex-val').textContent = idx.SENSEX.value.toLocaleString('en-IN');
-        const sChg = document.getElementById('sensex-chg');
-        sChg.textContent = `${idx.SENSEX.change>=0?'▲':'▼'} ${Math.abs(idx.SENSEX.change).toFixed(2)} (${idx.SENSEX.changePercent.toFixed(2)}%)`;
-        sChg.className = 'ticker-value ' + (idx.SENSEX.change >= 0 ? 'positive' : 'negative');
-      }
-      if (idx.BANKNIFTY) {
-        document.getElementById('bnifty-val').textContent = idx.BANKNIFTY.value.toLocaleString('en-IN');
-        const bChg = document.getElementById('bnifty-chg');
-        bChg.textContent = `${idx.BANKNIFTY.change>=0?'▲':'▼'} ${Math.abs(idx.BANKNIFTY.change).toFixed(2)} (${idx.BANKNIFTY.changePercent.toFixed(2)}%)`;
-        bChg.className = 'ticker-value ' + (idx.BANKNIFTY.change >= 0 ? 'positive' : 'negative');
+    // Fetch indices
+    const idxResults = await Promise.allSettled(INDEX_SYMBOLS.map(s => fetchYahooChart(s)));
+    const idxMap = { '^NSEI': 'NIFTY50', '^BSESN': 'SENSEX', '^NSEBANK': 'BANKNIFTY' };
+    for (let k = 0; k < idxResults.length; k++) {
+      if (idxResults[k].status === 'fulfilled' && idxResults[k].value) {
+        const meta = idxResults[k].value;
+        const prev = meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice;
+        const label = idxMap[INDEX_SYMBOLS[k]];
+        const val = meta.regularMarketPrice;
+        const chg = Math.round((val - prev) * 100) / 100;
+        const pct = Math.round(((val - prev) / prev * 100) * 100) / 100;
+        const elId = label === 'NIFTY50' ? 'nifty' : label === 'SENSEX' ? 'sensex' : 'bnifty';
+        document.getElementById(elId + '-val').textContent = val.toLocaleString('en-IN');
+        const chgEl = document.getElementById(elId + '-chg');
+        chgEl.textContent = `${chg>=0?'▲':'▼'} ${Math.abs(chg).toFixed(2)} (${pct.toFixed(2)}%)`;
+        chgEl.className = 'ticker-value ' + (chg >= 0 ? 'positive' : 'negative');
+        // Store for options chain
+        if (!window._indices) window._indices = {};
+        window._indices[label] = { value: val, change: chg, changePercent: pct };
       }
     }
 
@@ -423,30 +476,35 @@ async function fetchLiveData() {
     renderAll();
     console.log(`📊 Live update: ${stocks.length} stocks`);
   } catch(e) {
-    console.warn('Server not available, using simulated prices', e.message);
+    console.warn('Fetch error, using fallback', e.message);
     if (stocks.length === 0) loadFallbackData();
   }
+  fetchInProgress = false;
 }
 
-// Fallback mock data if server isn't running
+// Fallback mock data
 function loadFallbackData() {
   stocks = [
-    { symbol:'RELIANCE', name:'Reliance Industries', sector:'Oil & Gas', price:2935.50, change:42.30, changePercent:1.46, high52w:3217.60, low52w:2220.30, marketCap:'19.8L Cr', pe:28.4, volume:8423150 },
-    { symbol:'TCS', name:'Tata Consultancy Services', sector:'IT', price:3842.75, change:-28.15, changePercent:-0.73, high52w:4592.25, low52w:3311.80, marketCap:'13.9L Cr', pe:31.2, volume:3215800 },
-    { symbol:'HDFCBANK', name:'HDFC Bank', sector:'Banking', price:1678.90, change:15.60, changePercent:0.94, high52w:1880.00, low52w:1363.55, marketCap:'12.8L Cr', pe:19.8, volume:9876540 },
-    { symbol:'INFY', name:'Infosys', sector:'IT', price:1567.30, change:-12.45, changePercent:-0.79, high52w:1953.90, low52w:1358.35, marketCap:'6.5L Cr', pe:26.8, volume:7654320 },
-    { symbol:'ICICIBANK', name:'ICICI Bank', sector:'Banking', price:1245.80, change:22.70, changePercent:1.86, high52w:1362.35, low52w:970.05, marketCap:'8.7L Cr', pe:18.5, volume:11234500 },
-    { symbol:'HINDUNILVR', name:'Hindustan Unilever', sector:'FMCG', price:2456.15, change:-8.30, changePercent:-0.34, high52w:2859.30, low52w:2172.05, marketCap:'5.7L Cr', pe:56.3, volume:2345670 },
-    { symbol:'SBIN', name:'State Bank of India', sector:'Banking', price:825.40, change:18.90, changePercent:2.34, high52w:912.10, low52w:555.65, marketCap:'7.3L Cr', pe:10.2, volume:15678900 },
-    { symbol:'BHARTIARTL', name:'Bharti Airtel', sector:'Telecom', price:1689.25, change:35.80, changePercent:2.17, high52w:1779.00, low52w:1201.05, marketCap:'10.1L Cr', pe:75.4, volume:4567890 },
-    { symbol:'ITC', name:'ITC Limited', sector:'FMCG', price:438.65, change:2.15, changePercent:0.49, high52w:528.55, low52w:399.35, marketCap:'5.4L Cr', pe:25.6, volume:12345670 },
-    { symbol:'TATAMOTORS', name:'Tata Motors', sector:'Auto', price:742.30, change:28.90, changePercent:4.05, high52w:1025.00, low52w:620.55, marketCap:'2.7L Cr', pe:8.7, volume:18923450 },
-    { symbol:'BAJFINANCE', name:'Bajaj Finance', sector:'Finance', price:7234.50, change:123.80, changePercent:1.74, high52w:8192.00, low52w:6187.80, marketCap:'4.4L Cr', pe:32.6, volume:1234560 },
-    { symbol:'TATASTEEL', name:'Tata Steel', sector:'Metals', price:152.35, change:5.60, changePercent:3.82, high52w:184.60, low52w:122.40, marketCap:'1.9L Cr', pe:62.5, volume:25678900 },
+    { symbol:'RELIANCE', name:'Reliance Industries', sector:'Oil & Gas', price:1321.20, change:-19.80, changePercent:-1.48, high52w:1608.80, low52w:1114.85, marketCap:'17.8L Cr', pe:22.4, volume:8423150 },
+    { symbol:'TCS', name:'Tata Consultancy Services', sector:'IT', price:2258.90, change:-33.10, changePercent:-1.44, high52w:2650.00, low52w:1978.00, marketCap:'8.1L Cr', pe:28.2, volume:3215800 },
+    { symbol:'HDFCBANK', name:'HDFC Bank', sector:'Banking', price:744.55, change:-11.45, changePercent:-1.51, high52w:880.00, low52w:600.00, marketCap:'5.7L Cr', pe:18.8, volume:9876540 },
+    { symbol:'INFY', name:'Infosys', sector:'IT', price:1160.90, change:-17.10, changePercent:-1.45, high52w:1500.00, low52w:1050.00, marketCap:'4.8L Cr', pe:24.6, volume:7654320 },
+    { symbol:'ICICIBANK', name:'ICICI Bank', sector:'Banking', price:1256.40, change:-18.60, changePercent:-1.46, high52w:1360.00, low52w:970.00, marketCap:'8.8L Cr', pe:17.5, volume:11234500 },
+    { symbol:'SBIN', name:'State Bank of India', sector:'Banking', price:964.40, change:-14.60, changePercent:-1.49, high52w:1050.00, low52w:680.00, marketCap:'8.6L Cr', pe:9.8, volume:15678900 },
+    { symbol:'BHARTIARTL', name:'Bharti Airtel', sector:'Telecom', price:1829.00, change:-27.00, changePercent:-1.45, high52w:1950.00, low52w:1200.00, marketCap:'10.9L Cr', pe:72.4, volume:4567890 },
+    { symbol:'ITC', name:'ITC Limited', sector:'FMCG', price:286.90, change:-4.10, changePercent:-1.41, high52w:350.00, low52w:250.00, marketCap:'3.6L Cr', pe:22.6, volume:12345670 },
+    { symbol:'LT', name:'Larsen & Toubro', sector:'Infrastructure', price:4076.50, change:-60.50, changePercent:-1.46, high52w:4500.00, low52w:3060.00, marketCap:'5.6L Cr', pe:32.5, volume:2345670 },
+    { symbol:'TATAMOTORS', name:'Tata Motors', sector:'Auto', price:742.30, change:-11.70, changePercent:-1.55, high52w:1025.00, low52w:620.55, marketCap:'2.7L Cr', pe:8.7, volume:18923450 },
+    { symbol:'BAJFINANCE', name:'Bajaj Finance', sector:'Finance', price:908.25, change:-13.75, changePercent:-1.49, high52w:1200.00, low52w:680.00, marketCap:'5.6L Cr', pe:30.6, volume:1234560 },
+    { symbol:'TATASTEEL', name:'Tata Steel', sector:'Metals', price:152.35, change:-2.40, changePercent:-1.55, high52w:184.60, low52w:122.40, marketCap:'1.9L Cr', pe:62.5, volume:25678900 },
   ];
+  window._indices = {
+    NIFTY50: { value: 23547.75, change: -359.40, changePercent: -1.50 },
+    SENSEX: { value: 74775.74, change: -1092.06, changePercent: -1.44 },
+    BANKNIFTY: { value: 54239.20, change: -614.65, changePercent: -1.12 },
+  };
   initFilters();
   renderAll();
-  // Simulate prices locally when server is down
   setInterval(() => { simulateLocal(); renderAll(); }, 2000);
 }
 
@@ -757,15 +815,47 @@ let optionsPositions = [];
 
 async function fetchOptions() {
   try {
-    const res = await fetch('/api/options');
-    optionsData = await res.json();
+    const niftySpot = window._indices?.NIFTY50?.value || 23500;
+    const bniftySpot = window._indices?.BANKNIFTY?.value || 54000;
+    optionsData = {
+      NIFTY: generateOptionsChain('NIFTY', niftySpot, 50, 65),
+      BANKNIFTY: generateOptionsChain('BANKNIFTY', bniftySpot, 100, 15),
+    };
     if (activeTab === 'options') renderOptions();
   } catch(e) {
-    console.warn('Options API not available');
-    if (activeTab === 'options') {
-      document.getElementById('chain-container').innerHTML = '<div class="empty"><div class="empty-icon">📈</div><h3>Options data unavailable</h3><p>Start the server to see live options chain</p></div>';
-    }
+    console.warn('Options generation error', e);
   }
+}
+
+function generateOptionsChain(indexName, spotPrice, step, lotSize) {
+  const spot = Math.round(spotPrice / step) * step;
+  const expiries = [];
+  const now = new Date();
+  for (let i = 0; i < 21 && expiries.length < 3; i++) {
+    const d = new Date(now); d.setDate(now.getDate() + i);
+    if (d.getDay() === 2) expiries.push(d.toISOString().split('T')[0]); // Tuesday
+  }
+  const strikes = [];
+  for (let i = -10; i <= 10; i++) {
+    const strike = spot + i * step;
+    const diff = spotPrice - strike;
+    const daysToExpiry = Math.max(1, Math.ceil((new Date(expiries[0]) - now) / 86400000));
+    const timeValue = Math.sqrt(daysToExpiry) * step * 0.08;
+    const ceIntrinsic = Math.max(0, spotPrice - strike);
+    const peIntrinsic = Math.max(0, strike - spotPrice);
+    const vf = 1 + Math.random() * 0.3;
+    const cePremium = Math.round((ceIntrinsic + timeValue * vf * (1 - Math.abs(diff) / (spot * 0.1))) * 100) / 100;
+    const pePremium = Math.round((peIntrinsic + timeValue * vf * (1 - Math.abs(diff) / (spot * 0.1))) * 100) / 100;
+    const ceChg = Math.round((Math.random() - 0.45) * cePremium * 0.1 * 100) / 100;
+    const peChg = Math.round((Math.random() - 0.55) * pePremium * 0.1 * 100) / 100;
+    strikes.push({
+      strike,
+      ce: { premium: Math.max(0.5, cePremium), change: ceChg, oi: Math.round(Math.random() * 500000 + 50000), volume: Math.round(Math.random() * 200000) },
+      pe: { premium: Math.max(0.5, pePremium), change: peChg, oi: Math.round(Math.random() * 500000 + 50000), volume: Math.round(Math.random() * 200000) },
+      isATM: i === 0,
+    });
+  }
+  return { index: indexName, spot: spotPrice, lotSize, expiries, strikes };
 }
 
 function renderOptions() {
