@@ -1213,12 +1213,15 @@ function renderOptPositions() {
     el.innerHTML = '<div class="empty" style="padding:32px"><div class="empty-icon">📋</div><h3>No Options Positions</h3><p>Buy CE/PE from the chain above</p></div>';
     return;
   }
-  el.innerHTML = optionsPositions.map(p => {
+  el.innerHTML = optionsPositions.map((p, idx) => {
     const totalQty = p.lots * p.lotSize;
     const invested = p.avgPremium * totalQty;
     const current = p.currentPremium * totalQty;
     const pnl = current - invested;
     const pnlPct = invested > 0 ? ((pnl/invested)*100).toFixed(2) : '0.00';
+    const slBadge = p.sl ? `<span class="sltp-badge sl">SL ₹${p.sl}</span>` : '';
+    const tpBadge = p.tp ? `<span class="sltp-badge tp">TP ₹${p.tp}</span>` : '';
+    const tslBadge = p.trailingSL ? `<span class="sltp-badge sl">TSL ${p.trailingSL}%</span>` : '';
     return `<div class="opt-position">
       <div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
@@ -1226,14 +1229,90 @@ function renderOptPositions() {
           <span class="opt-tag ${p.type.toLowerCase()}">${p.type}</span>
         </div>
         <div style="font-size:12px;color:var(--text-muted)">${p.lots} lots × ${p.lotSize} = ${totalQty} qty • Avg ₹${p.avgPremium.toFixed(2)}</div>
+        <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${slBadge}${tpBadge}${tslBadge}</div>
       </div>
       <div style="text-align:right">
         <div class="font-mono" style="font-weight:600">${fmtINR(current)}</div>
         <div class="font-mono ${pnl>=0?'positive':'negative'}" style="font-size:13px">${pnl>=0?'+':''}${fmtINR(pnl)} (${pnlPct}%)</div>
-        <button class="sell-small-btn" onclick="openOptModal('${p.index}','${p.type}',${p.strike},${p.currentPremium},${p.lotSize})">SELL</button>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px">
+          <button class="sell-small-btn" style="background:rgba(59,130,246,0.15);color:var(--blue);margin-top:0" onclick="openOptSLTPModal(${idx})">⚙ SL/TP</button>
+          <button class="sell-small-btn" style="margin-top:0" onclick="openOptModal('${p.index}','${p.type}',${p.strike},${p.currentPremium},${p.lotSize})">SELL</button>
+        </div>
       </div>
     </div>`;
   }).join('');
+}
+
+function openOptSLTPModal(idx) {
+  const p = optionsPositions[idx];
+  if (!p) return;
+  const totalQty = p.lots * p.lotSize;
+  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modal').innerHTML = `
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size:20px;font-weight:700">⚙ Edit SL/TP</h3>
+          <p style="font-size:14px;color:var(--text-muted)">${p.index} ${p.strike} ${p.type} • ${p.lots} lots (${totalQty} qty)</p>
+        </div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-price-box">
+        <div>
+          <div style="font-size:12px;color:var(--text-muted)">Current Premium</div>
+          <div class="font-mono" style="font-size:22px;font-weight:700;color:${p.type==='CE'?'var(--green)':'var(--red)'}">₹${p.currentPremium.toFixed(2)}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:12px;color:var(--text-muted)">Avg Premium</div>
+          <div class="font-mono" style="font-size:16px">₹${p.avgPremium.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="sltp-row">
+        <div class="sltp-box sl">
+          <label>🔴 Stop Loss (Premium)</label>
+          <input type="number" id="edit-opt-sl" value="${p.sl || ''}" placeholder="e.g. ${(p.currentPremium*0.7).toFixed(2)}" step="0.05" />
+        </div>
+        <div class="sltp-box tp">
+          <label>🟢 Take Profit (Premium)</label>
+          <input type="number" id="edit-opt-tp" value="${p.tp || ''}" placeholder="e.g. ${(p.currentPremium*1.5).toFixed(2)}" step="0.05" />
+        </div>
+      </div>
+      <div class="sltp-row" style="grid-template-columns:1fr">
+        <div class="sltp-box" style="background:#12141E">
+          <label style="color:var(--yellow,#f59e0b)">📐 Trailing Stop Loss (%)</label>
+          <input type="number" id="edit-opt-tsl" value="${p.trailingSL || ''}" placeholder="e.g. 20 (means 20% trailing)" step="1" min="1" max="80" />
+          <div style="font-size:10px;color:var(--text-muted);margin-top:4px">SL auto-moves up as premium rises.</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="execute-btn buy" style="flex:1" onclick="saveOptSLTP(${idx})">💾 Save SL/TP</button>
+        <button class="execute-btn sell" style="flex:0.5" onclick="clearOptSLTP(${idx})">Clear All</button>
+      </div>
+    </div>`;
+  document.getElementById('modal').onclick = closeModal;
+}
+
+function saveOptSLTP(idx) {
+  const p = optionsPositions[idx];
+  if (!p) return;
+  p.sl = parseFloat(document.getElementById('edit-opt-sl').value) || null;
+  p.tp = parseFloat(document.getElementById('edit-opt-tp').value) || null;
+  p.trailingSL = parseFloat(document.getElementById('edit-opt-tsl').value) || null;
+  if (p.trailingSL) p.trailingHighest = Math.max(p.currentPremium, p.trailingHighest || p.currentPremium);
+  saveState();
+  closeModal();
+  showToast(`✅ SL/TP updated for ${p.index} ${p.strike} ${p.type}`, 'success');
+  renderAll();
+}
+
+function clearOptSLTP(idx) {
+  const p = optionsPositions[idx];
+  if (!p) return;
+  p.sl = null; p.tp = null; p.trailingSL = null; p.trailingHighest = null;
+  saveState();
+  closeModal();
+  showToast(`🗑 SL/TP cleared for ${p.index} ${p.strike} ${p.type}`, 'success');
+  renderAll();
 }
 
 // ===== INIT =====
